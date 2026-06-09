@@ -42,6 +42,7 @@ class Task:
     title: str = ""
     subject_id: Optional[str] = None
     subject_name: str = ""
+    plan_item_id: Optional[str] = None  # 关联的计划项ID
     priority: int = 2  # 1: 高, 2: 中, 3: 低
     due_date: str = field(default_factory=lambda: date.today().isoformat())
     status: str = "pending"  # pending, done, postponed

@@ -39,10 +39,16 @@ def add(title, subject, priority, date, description):
     subject_id = None
     subject_name = ""
     if subject:
-        subj = get_subject_by_name_or_id(storage, subject)
+        active_plan = storage.get_active_plan()
+        plan_id = active_plan.id if active_plan else None
+        subj = get_subject_by_name_or_id(storage, subject, plan_id)
         if subj:
             subject_id = subj.id
             subject_name = subj.name
+            if plan_id and subj.plan_id == plan_id:
+                click.echo(f"  关联科目: {subj.name} (来自当前计划)")
+            else:
+                click.echo(f"  关联科目: {subj.name} (来自其他计划)")
         else:
             click.echo(f"警告：未找到科目 '{subject}'，任务将不关联科目")
 
@@ -94,7 +100,9 @@ def list(date_str, all, subject, sort_priority, no_sort):
         tasks = [*tasks_dict.values()]
 
     if subject:
-        subj = get_subject_by_name_or_id(storage, subject)
+        active_plan = storage.get_active_plan()
+        plan_id = active_plan.id if active_plan else None
+        subj = get_subject_by_name_or_id(storage, subject, plan_id)
         if subj:
             tasks = [t for t in tasks if t.subject_id == subj.id]
         else:
@@ -214,7 +222,9 @@ def edit(task_id, title, subject, priority, date, description):
             task.subject_id = None
             task.subject_name = ""
         else:
-            subj = get_subject_by_name_or_id(storage, subject)
+            active_plan = storage.get_active_plan()
+            plan_id = active_plan.id if active_plan else None
+            subj = get_subject_by_name_or_id(storage, subject, plan_id)
             if subj:
                 task.subject_id = subj.id
                 task.subject_name = subj.name

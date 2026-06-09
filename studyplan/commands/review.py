@@ -28,7 +28,9 @@ def add_review(content, subject, source, notes, mastery):
     subject_id = None
     subject_name = ""
     if subject:
-        subj = get_subject_by_name_or_id(storage, subject)
+        active_plan = storage.get_active_plan()
+        plan_id = active_plan.id if active_plan else None
+        subj = get_subject_by_name_or_id(storage, subject, plan_id)
         if subj:
             subject_id = subj.id
             subject_name = subj.name
@@ -110,7 +112,9 @@ def list_reviews(due, subject, all, sort_mastery):
         reviews = storage.get_reviews_due()
 
     if subject:
-        subj = get_subject_by_name_or_id(storage, subject)
+        active_plan = storage.get_active_plan()
+        plan_id = active_plan.id if active_plan else None
+        subj = get_subject_by_name_or_id(storage, subject, plan_id)
         if subj:
             reviews = [r for r in reviews if r.subject_id == subj.id]
         else:
@@ -259,7 +263,9 @@ def edit_review(review_id, content, subject, source, notes, mastery):
             review.subject_id = None
             review.subject_name = ""
         else:
-            subj = get_subject_by_name_or_id(storage, subject)
+            active_plan = storage.get_active_plan()
+            plan_id = active_plan.id if active_plan else None
+            subj = get_subject_by_name_or_id(storage, subject, plan_id)
             if subj:
                 review.subject_id = subj.id
                 review.subject_name = subj.name

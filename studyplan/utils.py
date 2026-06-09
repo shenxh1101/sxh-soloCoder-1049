@@ -45,14 +45,39 @@ def sort_tasks_by_priority(tasks: List[Task]) -> List[Task]:
     return sorted(tasks, key=lambda t: (t.priority, t.due_date))
 
 
-def get_subject_by_name_or_id(storage: Storage, identifier: str) -> Optional[Subject]:
-    """通过名称或 ID 获取科目"""
+def get_subject_by_name_or_id(storage: Storage, identifier: str, plan_id: Optional[str] = None) -> Optional[Subject]:
+    """通过名称或 ID 获取科目，优先在指定/最新计划中查找"""
     subject = storage.get_subject(identifier)
     if subject:
         return subject
 
+    target_plan_id = plan_id
+    if not target_plan_id:
+        active_plan = storage.get_active_plan()
+        if active_plan:
+            target_plan_id = active_plan.id
+
+    if target_plan_id:
+        plan_subjects = storage.get_subjects_by_plan(target_plan_id)
+        for s in plan_subjects:
+            if s.name.lower() == identifier.lower():
+                return s
+
     subjects = storage.get_all_subjects()
     for s in subjects:
+        if s.name.lower() == identifier.lower():
+            return s
+    return None
+
+
+def get_subject_by_name_or_id_in_plan(storage: Storage, identifier: str, plan_id: str) -> Optional[Subject]:
+    """仅在指定计划中通过名称或 ID 获取科目"""
+    subject = storage.get_subject(identifier)
+    if subject and subject.plan_id == plan_id:
+        return subject
+
+    plan_subjects = storage.get_subjects_by_plan(plan_id)
+    for s in plan_subjects:
         if s.name.lower() == identifier.lower():
             return s
     return None

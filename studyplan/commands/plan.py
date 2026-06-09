@@ -1,7 +1,7 @@
 """plan 命令组 - 考试目标和科目计划管理"""
 import click
 from tabulate import tabulate
-from datetime import date
+from datetime import date, timedelta
 
 from ..storage import Storage
 from ..models import ExamPlan, Subject, PlanItem, Task
@@ -196,12 +196,33 @@ def show(plan_id):
         click.echo(f"  使用 'studyplan plan set-date <日期>' 设置考试日期")
 
     subjects = storage.get_subjects_by_plan(plan.id)
+    all_tasks = storage.get_all_tasks()
+    task_by_item_id = {t.plan_item_id: t for t in all_tasks if t.plan_item_id}
+
     click.echo(f"\n  科目列表 ({len(subjects)} 个):")
     if subjects:
         for s in subjects:
             click.echo(f"\n  📖 {s.name} (ID: {s.id})" + (f" - {s.description}" if s.description else ""))
             items = storage.get_plan_items_by_subject(s.id)
             if items:
+                total = len(items)
+                pending = sum(1 for i in items if i.status == "pending")
+                in_progress = sum(1 for i in items if i.status == "in_progress")
+                completed = sum(1 for i in items if i.status == "completed")
+                converted = sum(1 for i in items if i.status == "converted")
+                converted_done = sum(
+                    1 for i in items
+                    if i.status == "converted"
+                    and i.id in task_by_item_id
+                    and task_by_item_id[i.id].status == "done"
+                )
+                progress = completed + converted_done
+                progress_pct = (progress / total * 100) if total > 0 else 0
+
+                click.echo(f"    进度: {progress}/{total} ({progress_pct:.0f}%)"
+                           f" | 待开始:{pending} 进行中:{in_progress} 已完成:{completed}"
+                           f" | 已转任务:{converted} (其中已完成:{converted_done})")
+
                 click.echo(f"    拆分计划 ({len(items)} 项):")
                 table_data = []
                 for it in items:
@@ -213,6 +234,14 @@ def show(plan_id):
                         "converted": "已转任务"
                     }
                     status_str = status_map.get(it.status, it.status)
+                    if it.status == "converted" and it.id in task_by_item_id:
+                        task_status = task_by_item_id[it.id].status
+                        if task_status == "done":
+                            status_str = "✓ 任务已完成"
+                        elif task_status == "postponed":
+                            status_str = "⏳ 任务已推迟"
+                        else:
+                            status_str = "📋 任务待完成"
                     date_str = it.expected_date or "-"
                     table_data.append([
                         it.id,
@@ -234,6 +263,107 @@ def show(plan_id):
     else:
         click.echo("  暂无科目")
         click.echo("  使用 'studyplan plan add-subject <科目名>' 添加科目")
+    click.echo()
+
+
+@plan.command()
+@click.option("--plan-id", "-p", help="计划 ID，默认显示最新创建的计划")
+def progress(plan_id):
+    """显示各科目进度统计"""
+    storage = Storage()
+
+    if plan_id:
+        plan = storage.get_plan(plan_id)
+    else:
+        plan = storage.get_active_plan()
+
+    if not plan:
+        click.echo("尚未创建任何考试计划")
+        click.echo("使用 'studyplan plan create <名称>' 创建第一个计划")
+        return
+
+    from ..utils import format_duration, get_progress_color
+
+    subjects = storage.get_subjects_by_plan(plan.id)
+    all_tasks = storage.get_all_tasks()
+    all_records = storage.get_all_records()
+    task_by_item_id = {t.plan_item_id: t for t in all_tasks if t.plan_item_id}
+    task_durations = {}
+    for r in all_records:
+        if r.task_id in task_durations:
+            task_durations[r.task_id] += r.duration
+        else:
+            task_durations[r.task_id] = r.duration
+
+    click.echo(f"\n{'='*60}")
+    click.echo(f"📊 学习进度统计 - {plan.name}")
+    click.echo(f"{'='*60}")
+
+    if not subjects:
+        click.echo("\n  暂无科目")
+        click.echo("  使用 'studyplan plan add-subject <科目名>' 添加科目")
+        click.echo()
+        return
+
+    table_data = []
+    total_all = 0
+    progress_all = 0
+    total_study_time = 0
+
+    for s in subjects:
+        items = storage.get_plan_items_by_subject(s.id)
+        total = len(items)
+        total_all += total
+
+        pending = sum(1 for i in items if i.status == "pending")
+        in_progress = sum(1 for i in items if i.status == "in_progress")
+        completed = sum(1 for i in items if i.status == "completed")
+        converted = sum(1 for i in items if i.status == "converted")
+        converted_done = sum(
+            1 for i in items
+            if i.status == "converted"
+            and i.id in task_by_item_id
+            and task_by_item_id[i.id].status == "done"
+        )
+
+        progress = completed + converted_done
+        progress_all += progress
+        progress_pct = (progress / total * 100) if total > 0 else 0
+
+        subject_tasks = [t for t in all_tasks if t.subject_id == s.id]
+        subject_duration = sum(task_durations.get(t.id, 0) for t in subject_tasks)
+        total_study_time += subject_duration
+
+        color = get_progress_color(progress_pct)
+        progress_bar = "█" * int(progress_pct / 10) + "░" * (10 - int(progress_pct / 10))
+
+        table_data.append([
+            s.name,
+            total,
+            pending,
+            in_progress,
+            completed,
+            f"{converted}({converted_done}✓)",
+            f"{progress}/{total}",
+            f"{progress_bar} {progress_pct:.0f}%",
+            format_duration(subject_duration) if subject_duration > 0 else "-"
+        ])
+
+    click.echo(f"\n{'='*60}")
+    click.echo(tabulate(
+        table_data,
+        headers=["科目", "总计", "待开始", "进行中", "已完成", "已转任务", "进度", "完成率", "学习时长"],
+        tablefmt="simple",
+        showindex=False
+    ))
+    click.echo(f"{'='*60}")
+
+    overall_pct = (progress_all / total_all * 100) if total_all > 0 else 0
+    click.echo(f"\n  总体进度: {progress_all}/{total_all} ({overall_pct:.0f}%)")
+    click.echo(f"  总学习时长: {format_duration(total_study_time)}")
+    click.echo()
+    click.echo("  使用 'studyplan plan show' 查看详细计划项")
+    click.echo("  使用 'studyplan stats subject' 查看详细科目统计")
     click.echo()
 
 
@@ -313,8 +443,8 @@ def split_plan(subject_name, tasks, priority, date_str, notes, plan_id):
         click.echo("错误：未找到考试计划，请先创建计划")
         return
 
-    from ..utils import get_subject_by_name_or_id
-    subject = get_subject_by_name_or_id(storage, subject_name)
+    from ..utils import get_subject_by_name_or_id_in_plan
+    subject = get_subject_by_name_or_id_in_plan(storage, subject_name, plan.id)
 
     if not subject:
         subject = Subject(name=subject_name, plan_id=plan.id)
@@ -396,11 +526,12 @@ def item_add(subject_name, title, priority, date_str, notes, order, plan_id):
         click.echo("错误：未找到考试计划，请先创建计划")
         return
 
-    from ..utils import get_subject_by_name_or_id
-    subject = get_subject_by_name_or_id(storage, subject_name)
+    from ..utils import get_subject_by_name_or_id_in_plan
+    subject = get_subject_by_name_or_id_in_plan(storage, subject_name, plan.id)
 
     if not subject:
-        click.echo(f"错误：未找到科目 '{subject_name}'")
+        click.echo(f"错误：在当前计划中未找到科目 '{subject_name}'")
+        click.echo(f"请使用 --plan-id 指定其他计划，或先添加该科目到当前计划")
         return
 
     priority_map = {'1': 1, 'high': 1, '2': 2, 'medium': 2, '3': 3, 'low': 3}
@@ -625,8 +756,22 @@ def item_convert(item_id, date_str, keep):
         return
 
     if item.status == "converted" and not keep:
-        click.echo(f"警告：该计划项已转为任务")
+        click.echo(f"警告：该计划项已转为任务 (ID: {item.converted_task_id})")
         confirm = click.confirm("要再次转换吗？")
+        if not confirm:
+            return
+
+    existing_task = None
+    if not keep:
+        all_tasks = storage.get_all_tasks()
+        for t in all_tasks:
+            if t.plan_item_id == item.id:
+                existing_task = t
+                break
+
+    if existing_task and not keep:
+        click.echo(f"警告：该计划项已有对应的任务 (ID: {existing_task.id})")
+        confirm = click.confirm("确定要生成新的任务吗？")
         if not confirm:
             return
 
@@ -639,6 +784,7 @@ def item_convert(item_id, date_str, keep):
         title=item.title,
         subject_id=item.subject_id,
         subject_name=item.subject_name,
+        plan_item_id=item.id,
         priority=item.priority,
         due_date=parsed.isoformat(),
         description=item.notes
@@ -658,6 +804,229 @@ def item_convert(item_id, date_str, keep):
     if item.notes:
         click.echo(f"  描述: {item.notes}")
     click.echo(f"\n使用 'studyplan done mark {task.id} --duration <分钟>' 标记完成")
+
+
+@item.command("schedule")
+@click.option("--subject", "-s", "subject_name", help="指定科目名称，不指定则安排所有科目")
+@click.option("--from", "-f", "from_date_str", default="tomorrow", help="开始日期，默认明天")
+@click.option("--per-day", "-n", type=int, default=3, help="每天最多安排几个任务，默认 3")
+@click.option("--priority-only", "-p", is_flag=True, help="只安排高优先级计划项")
+@click.option("--plan-id", help="指定计划 ID，默认使用当前最新计划")
+@click.option("--dry-run", is_flag=True, help="只预览不实际生成")
+def item_schedule(subject_name, from_date_str, per_day, priority_only, plan_id, dry_run):
+    """按科目批量安排待开始的计划项到未来几天"""
+    storage = Storage()
+
+    if plan_id:
+        plan = storage.get_plan(plan_id)
+    else:
+        plan = storage.get_active_plan()
+
+    if not plan:
+        click.echo("错误：未找到考试计划，请先创建计划")
+        return
+
+    from ..utils import parse_date, get_subject_by_name_or_id_in_plan, get_priority_label
+
+    from_date = parse_date(from_date_str)
+    if not from_date:
+        click.echo(f"错误：无效的日期格式 '{from_date_str}'")
+        return
+
+    if subject_name:
+        subject = get_subject_by_name_or_id_in_plan(storage, subject_name, plan.id)
+        if not subject:
+            click.echo(f"错误：在当前计划中未找到科目 '{subject_name}'")
+            return
+        items = storage.get_plan_items_by_subject(subject.id)
+    else:
+        items = storage.get_plan_items_by_plan(plan.id)
+
+    pending_items = [
+        i for i in items
+        if i.status in ["pending", "in_progress"]
+        and (not priority_only or i.priority == 1)
+    ]
+
+    if not pending_items:
+        click.echo("没有可安排的计划项")
+        return
+
+    existing_task_map = {}
+    all_tasks = storage.get_all_tasks()
+    for t in all_tasks:
+        if t.plan_item_id:
+            existing_task_map[t.plan_item_id] = t
+
+    pending_items = [
+        i for i in pending_items
+        if i.id not in existing_task_map
+    ]
+
+    if not pending_items:
+        click.echo("所有待安排的计划项都已有对应的任务")
+        return
+
+    pending_items.sort(key=lambda i: (i.priority, i.order, i.created_at))
+
+    click.echo(f"计划: {plan.name}")
+    click.echo(f"开始日期: {from_date.isoformat()}")
+    click.echo(f"每天最多: {per_day} 个")
+    if subject_name:
+        click.echo(f"科目: {subject_name}")
+    if priority_only:
+        click.echo("仅安排高优先级")
+    click.echo(f"待安排: {len(pending_items)} 个计划项")
+    click.echo()
+
+    schedule = {}
+    current_date = from_date
+    items_remaining = pending_items.copy()
+
+    while items_remaining:
+        day_items = items_remaining[:per_day]
+        schedule[current_date.isoformat()] = day_items
+        items_remaining = items_remaining[per_day:]
+        current_date = current_date + timedelta(days=1)
+
+    for date_str, day_items in schedule.items():
+        click.echo(f"📅 {date_str}")
+        for i, item in enumerate(day_items, 1):
+            click.echo(f"  {i}. [{get_priority_label(item.priority)}] {item.title} ({item.subject_name})")
+        click.echo()
+
+    if dry_run:
+        click.echo("(预览模式，未实际生成任务)")
+        return
+
+    confirm = click.confirm(f"确定要生成 {len(pending_items)} 个任务吗？")
+    if not confirm:
+        return
+
+    total_created = 0
+    for date_str, day_items in schedule.items():
+        for item in day_items:
+            task = Task(
+                title=item.title,
+                subject_id=item.subject_id,
+                subject_name=item.subject_name,
+                plan_item_id=item.id,
+                priority=item.priority,
+                due_date=date_str,
+                description=item.notes
+            )
+            task = storage.save_task(task)
+
+            item.status = "converted"
+            item.converted_task_id = task.id
+            storage.update_plan_item(item)
+
+            total_created += 1
+
+    click.echo(f"✓ 已生成 {total_created} 个任务，安排到 {len(schedule)} 天")
+    click.echo(f"使用 'studyplan task list --date <日期>' 查看每日任务")
+
+
+@plan.command("calendar")
+@click.option("--days", "-n", type=int, default=14, help="显示未来 N 天，默认 14 天")
+@click.option("--plan-id", "-p", help="指定计划 ID，默认使用当前最新计划")
+@click.option("--all", "-a", "show_all", is_flag=True, help="显示所有计划的任务")
+def plan_calendar(days, plan_id, show_all):
+    """按日期查看近期学习安排"""
+    storage = Storage()
+
+    today = date.today()
+    end_date = today + timedelta(days=days)
+
+    if show_all:
+        plan = None
+        click.echo(f"📅 近期安排（所有计划，未来 {days} 天）")
+    else:
+        if plan_id:
+            plan = storage.get_plan(plan_id)
+        else:
+            plan = storage.get_active_plan()
+
+        if not plan:
+            click.echo("错误：未找到考试计划，请先创建计划")
+            return
+        click.echo(f"📅 近期安排 - {plan.name}（未来 {days} 天）")
+
+    all_tasks = storage.get_all_tasks()
+    all_items = storage.get_all_plan_items()
+
+    if plan and not show_all:
+        all_tasks = [t for t in all_tasks if t.subject_id in [s.id for s in storage.get_subjects_by_plan(plan.id)]]
+        all_items = [i for i in all_items if i.plan_id == plan.id]
+
+    scheduled_tasks = {}
+    for t in all_tasks:
+        try:
+            task_date = date.fromisoformat(t.due_date)
+            if today <= task_date <= end_date:
+                date_str = task_date.isoformat()
+                if date_str not in scheduled_tasks:
+                    scheduled_tasks[date_str] = []
+                scheduled_tasks[date_str].append(t)
+        except (ValueError, TypeError):
+            continue
+
+    unscheduled_high_priority = [
+        i for i in all_items
+        if i.status in ["pending", "in_progress"]
+        and i.priority == 1
+        and not any(t.plan_item_id == i.id for t in all_tasks)
+    ]
+
+    from ..utils import get_priority_label
+
+    click.echo(f"{'='*60}")
+    click.echo(f"  今天: {today.isoformat()}")
+    click.echo(f"{'='*60}")
+
+    current = today
+    has_content = False
+    while current <= end_date:
+        date_str = current.isoformat()
+        tasks = scheduled_tasks.get(date_str, [])
+        is_today = current == today
+        weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][current.weekday()]
+
+        if tasks or is_today:
+            has_content = True
+            today_marker = " 📍" if is_today else ""
+            click.echo(f"\n📆 {date_str} ({weekday}){today_marker}")
+
+            if tasks:
+                tasks.sort(key=lambda t: (t.priority, t.due_date))
+                for i, t in enumerate(tasks, 1):
+                    status_icon = "✅" if t.status == "done" else "⏳" if t.status == "postponed" else "📋"
+                    subject_str = f" [{t.subject_name}]" if t.subject_name else ""
+                    priority_str = f" [{get_priority_label(t.priority)}]" if t.priority != 2 else ""
+                    plan_item_str = f" (来自计划)" if t.plan_item_id else ""
+                    click.echo(f"  {status_icon} {i}. {t.title}{subject_str}{priority_str}{plan_item_str}")
+            else:
+                click.echo(f"  (暂无安排)")
+
+        current = current + timedelta(days=1)
+
+    if not has_content:
+        click.echo(f"\n  未来 {days} 天暂无安排")
+
+    if unscheduled_high_priority:
+        click.echo(f"\n{'='*60}")
+        click.echo(f"⚠️  未安排日期的高优先级计划项 ({len(unscheduled_high_priority)} 个):")
+        click.echo(f"{'='*60}")
+        unscheduled_high_priority.sort(key=lambda i: (i.priority, i.order, i.created_at))
+        for i, item in enumerate(unscheduled_high_priority, 1):
+            exp_date = f" (预计: {item.expected_date})" if item.expected_date else ""
+            click.echo(f"  {i}. [{get_priority_label(item.priority)}] {item.title} ({item.subject_name}){exp_date}")
+        click.echo(f"\n使用 'studyplan plan item schedule --priority-only' 快速安排这些计划项")
+
+    click.echo()
+    click.echo("使用 'studyplan plan item schedule' 批量安排更多计划项")
+    click.echo("使用 'studyplan task list --date <日期>' 查看某日详细任务")
+    click.echo()
 
 
 plan.add_command(item)

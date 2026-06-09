@@ -52,6 +52,14 @@ def mark(task_id, duration, hours):
 
     storage.update_task(task)
 
+    if task.plan_item_id:
+        plan_item = storage.get_plan_item(task.plan_item_id)
+        if plan_item and plan_item.status != "completed":
+            old_status = plan_item.status
+            plan_item.status = "completed"
+            storage.update_plan_item(plan_item)
+            click.echo(f"  ℹ️ 关联计划项已更新: {old_status} → 已完成")
+
     if total_minutes > 0:
         record = StudyRecord(
             date=date.today().isoformat(),
@@ -217,6 +225,13 @@ def undo(task_id):
     task.completed_at = None
     task.study_duration = 0
     storage.update_task(task)
+
+    if task.plan_item_id:
+        plan_item = storage.get_plan_item(task.plan_item_id)
+        if plan_item and plan_item.status == "completed":
+            plan_item.status = "converted"
+            storage.update_plan_item(plan_item)
+            click.echo(f"  ℹ️ 关联计划项已回退: 已完成 → 已转任务")
 
     click.echo(f"✓ 已取消完成标记: {task.title}")
     click.echo("  任务已恢复为待完成状态")

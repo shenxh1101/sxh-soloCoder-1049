@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import date, timedelta
 
-from .models import ExamPlan, Subject, Task, ReviewItem, StudyRecord
+from .models import ExamPlan, Subject, Task, ReviewItem, StudyRecord, PlanItem
 
 
 class Storage:
@@ -21,7 +21,7 @@ class Storage:
 
     def _init_files(self):
         """初始化数据文件"""
-        files = ["plans.json", "subjects.json", "tasks.json", "reviews.json", "records.json"]
+        files = ["plans.json", "subjects.json", "tasks.json", "reviews.json", "records.json", "plan_items.json"]
         for f in files:
             file_path = self.data_dir / f
             if not file_path.exists():
@@ -71,7 +71,7 @@ class Storage:
         plans = self.get_all_plans()
         if not plans:
             return None
-        plans_sorted = sorted(plans, key=lambda p: p.created_at, reverse=True)
+        plans_sorted = sorted(plans, key=lambda p: (p.created_at, p.id), reverse=True)
         return plans_sorted[0] if plans_sorted else None
 
     def delete_plan(self, plan_id: str) -> bool:
@@ -266,3 +266,88 @@ class Storage:
                 break
 
         return streak
+
+    def delete_record(self, record_id: str) -> bool:
+        """删除学习记录"""
+        records = self._read_json(self.data_dir / "records.json")
+        new_records = [r for r in records if r["id"] != record_id]
+        if len(new_records) == len(records):
+            return False
+        self._write_json(self.data_dir / "records.json", new_records)
+        return True
+
+    def delete_records_by_task(self, task_id: str) -> int:
+        """删除指定任务的所有学习记录，返回删除的记录数"""
+        records = self._read_json(self.data_dir / "records.json")
+        deleted_count = 0
+        new_records = []
+        for r in records:
+            if r.get("task_id") == task_id:
+                deleted_count += 1
+            else:
+                new_records.append(r)
+        if deleted_count > 0:
+            self._write_json(self.data_dir / "records.json", new_records)
+        return deleted_count
+
+    # -------- PlanItem 相关操作 --------
+
+    def save_plan_item(self, item: PlanItem) -> PlanItem:
+        """保存科目拆分计划项"""
+        items = self._read_json(self.data_dir / "plan_items.json")
+        items.append(item.to_dict())
+        self._write_json(self.data_dir / "plan_items.json", items)
+        return item
+
+    def update_plan_item(self, item: PlanItem) -> Optional[PlanItem]:
+        """更新科目拆分计划项"""
+        items = self._read_json(self.data_dir / "plan_items.json")
+        for i, it in enumerate(items):
+            if it["id"] == item.id:
+                items[i] = item.to_dict()
+                self._write_json(self.data_dir / "plan_items.json", items)
+                return item
+        return None
+
+    def get_plan_item(self, item_id: str) -> Optional[PlanItem]:
+        """获取单个计划项"""
+        items = self._read_json(self.data_dir / "plan_items.json")
+        for it in items:
+            if it["id"] == item_id:
+                return PlanItem(**it)
+        return None
+
+    def get_plan_items_by_subject(self, subject_id: str) -> List[PlanItem]:
+        """获取指定科目的所有计划项"""
+        items = self._read_json(self.data_dir / "plan_items.json")
+        result = [PlanItem(**it) for it in items if it["subject_id"] == subject_id]
+        return sorted(result, key=lambda x: (x.order, x.created_at))
+
+    def get_plan_items_by_plan(self, plan_id: str) -> List[PlanItem]:
+        """获取指定计划的所有计划项"""
+        items = self._read_json(self.data_dir / "plan_items.json")
+        result = [PlanItem(**it) for it in items if it["plan_id"] == plan_id]
+        return sorted(result, key=lambda x: (x.order, x.created_at))
+
+    def get_all_plan_items(self) -> List[PlanItem]:
+        """获取所有计划项"""
+        items = self._read_json(self.data_dir / "plan_items.json")
+        return [PlanItem(**it) for it in items]
+
+    def delete_plan_item(self, item_id: str) -> bool:
+        """删除计划项"""
+        items = self._read_json(self.data_dir / "plan_items.json")
+        new_items = [it for it in items if it["id"] != item_id]
+        if len(new_items) == len(items):
+            return False
+        self._write_json(self.data_dir / "plan_items.json", new_items)
+        return True
+
+    def delete_plan_items_by_subject(self, subject_id: str) -> int:
+        """删除指定科目的所有计划项，返回删除数量"""
+        items = self._read_json(self.data_dir / "plan_items.json")
+        new_items = [it for it in items if it["subject_id"] != subject_id]
+        deleted = len(items) - len(new_items)
+        if deleted > 0:
+            self._write_json(self.data_dir / "plan_items.json", new_items)
+        return deleted

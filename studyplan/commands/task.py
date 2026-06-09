@@ -84,10 +84,14 @@ def list(date_str, all, subject, sort_priority, no_sort):
         tasks = storage.get_tasks_by_date(parsed.isoformat())
     else:
         today = date.today().isoformat()
-        tasks = storage.get_tasks_by_date(today)
-        postponed = [t for t in storage.get_all_tasks()
-                     if t.status == "postponed" and t.due_date <= today]
-        tasks.extend(postponed)
+        tasks_dict = {}
+        for t in storage.get_tasks_by_date(today):
+            tasks_dict[t.id] = t
+        for t in storage.get_all_tasks():
+            if t.status == "postponed" and t.due_date <= today:
+                if t.id not in tasks_dict:
+                    tasks_dict[t.id] = t
+        tasks = [*tasks_dict.values()]
 
     if subject:
         subj = get_subject_by_name_or_id(storage, subject)
@@ -265,11 +269,15 @@ def today_tasks():
     storage = Storage()
     today = date.today().isoformat()
 
-    today_tasks = storage.get_tasks_by_date(today)
-    postponed = [t for t in storage.get_all_tasks()
-                 if t.status == "postponed" and t.due_date <= today]
+    tasks_dict = {}
+    for t in storage.get_tasks_by_date(today):
+        tasks_dict[t.id] = t
+    for t in storage.get_all_tasks():
+        if t.status == "postponed" and t.due_date <= today:
+            if t.id not in tasks_dict:
+                tasks_dict[t.id] = t
 
-    all_tasks = today_tasks + postponed
+    all_tasks = [*tasks_dict.values()]
     all_tasks = sort_tasks_by_priority(all_tasks)
 
     if not all_tasks:

@@ -40,10 +40,14 @@ def today_overview():
     if streak > 0:
         click.echo(f"🔥 连续学习: {streak} 天")
 
-    today_tasks = storage.get_tasks_by_date(today)
-    postponed = [t for t in storage.get_all_tasks()
-                 if t.status == "postponed" and t.due_date <= today]
-    all_tasks = today_tasks + postponed
+    tasks_dict = {}
+    for t in storage.get_tasks_by_date(today):
+        tasks_dict[t.id] = t
+    for t in storage.get_all_tasks():
+        if t.status == "postponed" and t.due_date <= today:
+            if t.id not in tasks_dict:
+                tasks_dict[t.id] = t
+    all_tasks = [*tasks_dict.values()]
 
     done_count = sum(1 for t in all_tasks if t.status == "done")
     pending_count = sum(1 for t in all_tasks if t.status == "pending")

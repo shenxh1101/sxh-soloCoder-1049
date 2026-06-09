@@ -15,7 +15,7 @@ class ExamPlan:
     id: str = field(default_factory=_generate_id)
     name: str = ""
     exam_date: Optional[str] = None
-    created_at: str = field(default_factory=lambda: date.today().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     subjects: List[str] = field(default_factory=list)
 
     def to_dict(self):
@@ -68,6 +68,26 @@ class ReviewItem:
     next_review: str = field(default_factory=lambda: date.today().isoformat())
     mastery: int = 0  # 0-100 掌握程度
     notes: str = ""
+    created_at: str = field(default_factory=lambda: date.today().isoformat())
+
+    def to_dict(self):
+        return asdict(self)
+
+
+@dataclass
+class PlanItem:
+    """科目拆分计划项"""
+    id: str = field(default_factory=_generate_id)
+    title: str = ""
+    subject_id: str = ""
+    subject_name: str = ""
+    plan_id: str = ""
+    priority: int = 2  # 1: 高, 2: 中, 3: 低
+    expected_date: Optional[str] = None  # 预计完成日期
+    notes: str = ""
+    status: str = "pending"  # pending, in_progress, completed, converted
+    converted_task_id: Optional[str] = None  # 转成任务后的任务ID
+    order: int = 0  # 排序序号
     created_at: str = field(default_factory=lambda: date.today().isoformat())
 
     def to_dict(self):

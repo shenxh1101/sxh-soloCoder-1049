@@ -210,12 +210,19 @@ def undo(task_id):
         click.echo(f"任务 '{task.title}' 当前不是已完成状态")
         return
 
+    deleted_records = storage.delete_records_by_task(task_id)
+    old_duration = task.study_duration
+
     task.status = "pending"
     task.completed_at = None
+    task.study_duration = 0
     storage.update_task(task)
 
     click.echo(f"✓ 已取消完成标记: {task.title}")
     click.echo("  任务已恢复为待完成状态")
+    if deleted_records > 0:
+        click.echo(f"  已删除 {deleted_records} 条关联学习记录 ({format_duration(old_duration)})")
+        click.echo("  今日总结、科目统计、连续学习天数会自动更新")
 
 
 @done.command()
